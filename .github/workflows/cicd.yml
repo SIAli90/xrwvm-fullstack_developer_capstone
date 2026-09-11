@@ -7,19 +7,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: capstone-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   integration-test:
     runs-on: ubuntu-latest
-    services:
-      mongodb:
-        image: mongo:7
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
 
     steps:
       - name: Check out repository
@@ -55,7 +49,7 @@ jobs:
       - name: Start dealer API
         working-directory: server/database
         env:
-          MONGO_URL: mongodb://127.0.0.1:27017/
+          USE_MEMORY_DB: "true"
         run: |
           nohup node app.js > /tmp/dealer_api.log 2>&1 &
           for i in {1..30}; do
@@ -63,7 +57,7 @@ jobs:
               echo "Dealer API is ready"
               exit 0
             fi
-            sleep 2
+            sleep 1
           done
           cat /tmp/dealer_api.log
           exit 1
@@ -88,7 +82,7 @@ jobs:
               echo "Sentiment analyzer is ready"
               exit 0
             fi
-            sleep 2
+            sleep 1
           done
           cat /tmp/sentiment.log
           exit 1
@@ -111,7 +105,7 @@ jobs:
               cat /tmp/django_server.log
               exit 0
             fi
-            sleep 2
+            sleep 1
           done
           cat /tmp/django_server.log
           exit 1
@@ -172,7 +166,7 @@ jobs:
             'Full Stack Capstone CI - SUCCESS' \
             'Check out repository - SUCCESS' \
             'Build React frontend - SUCCESS' \
-            'Start MongoDB/dealer API - SUCCESS' \
+            'Start dealer API - SUCCESS' \
             'Start sentiment analyzer - SUCCESS' \
             'Django migrations/checks - SUCCESS' \
             'Start Django server - SUCCESS' \
