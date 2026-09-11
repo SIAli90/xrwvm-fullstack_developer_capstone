@@ -15,6 +15,7 @@ urlpatterns = [
     path('login', react_app, name='login_page'),
     path('register', react_app, name='register_page'),
     path('dealers', react_app, name='dealers_page'),
+    path('dealers/<str:state>', react_app, name='dealers_state_page'),
     path('dealer/<int:dealer_id>', react_app, name='dealer_page'),
     path('postreview/<int:dealer_id>', react_app, name='post_review_page'),
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
