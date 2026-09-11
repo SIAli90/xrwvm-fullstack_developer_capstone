@@ -37,7 +37,7 @@ jobs:
         working-directory: server/frontend
         run: |
           npm install
-          npm run build
+          CI=false npm run build
 
       - name: Install dealer API dependencies
         working-directory: server/database
