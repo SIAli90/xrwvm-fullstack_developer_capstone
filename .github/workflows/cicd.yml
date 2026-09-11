@@ -25,6 +25,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Configure ephemeral test credentials
+        run: |
+          echo "TEST_USERNAME=capstoneuser" >> "$GITHUB_ENV"
+          echo "TEST_PASSWORD=Capstone-${GITHUB_RUN_ID}-A1!" >> "$GITHUB_ENV"
+          echo "ADMIN_USERNAME=root" >> "$GITHUB_ENV"
+          echo "ADMIN_PASSWORD=Admin-${GITHUB_RUN_ID}-A1!" >> "$GITHUB_ENV"
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -91,7 +98,7 @@ jobs:
         run: |
           python manage.py migrate --noinput
           python manage.py check
-          python manage.py shell -c "from django.contrib.auth.models import User; User.objects.filter(username='capstoneuser').delete(); User.objects.create_user(username='capstoneuser', first_name='Capstone', last_name='User', email='capstone@example.com', password='Capstone2026!')"
+          python manage.py shell -c "import os; from django.contrib.auth.models import User; u=os.environ['TEST_USERNAME']; a=os.environ['ADMIN_USERNAME']; User.objects.filter(username__in=[u,a]).delete(); User.objects.create_user(username=u, first_name='Capstone', last_name='User', email='capstone@example.com', password=os.environ['TEST_PASSWORD']); User.objects.create_superuser(username=a, email='root@example.com', password=os.environ['ADMIN_PASSWORD'])"
 
       - name: Start Django server
         working-directory: server
@@ -100,6 +107,7 @@ jobs:
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:8000/ > /dev/null; then
               echo "Django server is running on http://127.0.0.1:8000"
+              sleep 1
               cat /tmp/django_server.log
               exit 0
             fi
@@ -113,8 +121,8 @@ jobs:
           mkdir -p submission_evidence
           cp /tmp/django_server.log submission_evidence/django_server
 
-          echo "curl -sS -c cookies.txt -X POST http://127.0.0.1:8000/djangoapp/login -H 'Content-Type: application/json' -d '{\"userName\":\"capstoneuser\",\"password\":\"Capstone2026!\"}'" > submission_evidence/loginuser
-          curl -sS -c cookies.txt -X POST http://127.0.0.1:8000/djangoapp/login -H 'Content-Type: application/json' -d '{"userName":"capstoneuser","password":"Capstone2026!"}' >> submission_evidence/loginuser
+          printf "curl -sS -c cookies.txt -X POST http://127.0.0.1:8000/djangoapp/login -H 'Content-Type: application/json' -d '{\"userName\":\"%s\",\"password\":\"%s\"}'\n" "$TEST_USERNAME" "$TEST_PASSWORD" > submission_evidence/loginuser
+          curl -sS -c cookies.txt -X POST http://127.0.0.1:8000/djangoapp/login -H 'Content-Type: application/json' -d "{\"userName\":\"$TEST_USERNAME\",\"password\":\"$TEST_PASSWORD\"}" >> submission_evidence/loginuser
           echo >> submission_evidence/loginuser
 
           echo "curl -sS -b cookies.txt http://127.0.0.1:8000/djangoapp/logout" > submission_evidence/logoutuser
@@ -145,6 +153,21 @@ jobs:
           curl -sS http://127.0.0.1:5050/analyze/Fantastic%20services >> submission_evidence/analyzereview
           echo >> submission_evidence/analyzereview
 
+      - name: Install Playwright for screenshot evidence
+        working-directory: scripts
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Capture genuine browser evidence
+        working-directory: scripts
+        env:
+          BASE_URL: http://127.0.0.1:8000
+          EVIDENCE_DIR: ../submission_evidence
+        run: node capture_evidence.js
+
+      - name: Save CI/CD step evidence
+        run: |
           printf '%s\n' \
             'Full Stack Capstone CI - SUCCESS' \
             'Check out repository - SUCCESS' \
@@ -153,11 +176,11 @@ jobs:
             'Start sentiment analyzer - SUCCESS' \
             'Django migrations/checks - SUCCESS' \
             'Start Django server - SUCCESS' \
-            'Rubric cURL checks - SUCCESS' > submission_evidence/CICD
-
+            'Rubric cURL checks - SUCCESS' \
+            'Capture browser evidence - SUCCESS' > submission_evidence/CICD
           for file in submission_evidence/*; do
             echo "===== $file ====="
-            cat "$file"
+            if file "$file" | grep -q text; then cat "$file"; else echo "binary screenshot artifact"; fi
           done
 
       - name: Upload rubric evidence
