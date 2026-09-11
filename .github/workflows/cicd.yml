@@ -123,8 +123,8 @@ jobs:
           curl -sS -b cookies.txt http://127.0.0.1:8000/djangoapp/logout >> submission_evidence/logoutuser
           echo >> submission_evidence/logoutuser
 
-          echo "curl -sS http://127.0.0.1:3030/fetchReviews/dealer/1" > submission_evidence/getdealerreviews
-          curl -sS http://127.0.0.1:3030/fetchReviews/dealer/1 >> submission_evidence/getdealerreviews
+          echo "curl -sS http://127.0.0.1:3030/fetchReviews/dealer/15" > submission_evidence/getdealerreviews
+          curl -sS http://127.0.0.1:3030/fetchReviews/dealer/15 >> submission_evidence/getdealerreviews
           echo >> submission_evidence/getdealerreviews
 
           echo "curl -sS http://127.0.0.1:3030/fetchDealers" > submission_evidence/getalldealers
