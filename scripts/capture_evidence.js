@@ -8,6 +8,7 @@ const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const TEST_USERNAME = process.env.TEST_USERNAME;
 const TEST_PASSWORD = process.env.TEST_PASSWORD;
+const REVIEW_DEALER_ID = 15;
 
 if (!ADMIN_USERNAME || !ADMIN_PASSWORD || !TEST_USERNAME || !TEST_PASSWORD) {
   throw new Error('Screenshot capture credentials were not supplied through environment variables.');
@@ -78,11 +79,12 @@ const screenshot = async (page, filename) => {
   await page.waitForSelector('table tbody tr');
   await screenshot(page, 'dealersbystate.png');
 
-  await page.goto(`${BASE_URL}/dealer/1`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE_URL}/dealer/${REVIEW_DEALER_ID}`, { waitUntil: 'networkidle' });
   await page.waitForSelector('text=Customer Reviews');
+  await page.waitForSelector('.review_panel');
   await screenshot(page, 'dealer_id_reviews.png');
 
-  await page.goto(`${BASE_URL}/postreview/1`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE_URL}/postreview/${REVIEW_DEALER_ID}`, { waitUntil: 'networkidle' });
   await page.waitForSelector('textarea#review');
   await page.fill('textarea#review', 'Fantastic services and friendly staff');
   await page.fill('input[type="date"]', '2023-08-15');
@@ -95,7 +97,7 @@ const screenshot = async (page, filename) => {
   await screenshot(page, 'dealership_review_submission.png');
 
   await Promise.all([
-    page.waitForURL(/\/dealer\/1$/),
+    page.waitForURL(new RegExp(`/dealer/${REVIEW_DEALER_ID}$`)),
     page.getByRole('button', { name: 'Post Review' }).click(),
   ]);
   await page.waitForSelector('text=Fantastic services and friendly staff');
