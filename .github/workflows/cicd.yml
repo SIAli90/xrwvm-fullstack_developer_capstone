@@ -97,10 +97,10 @@ jobs:
       - name: Start Django server
         working-directory: server
         run: |
-          nohup python -u manage.py runserver 127.0.0.1:8000 > /tmp/django_server.log 2>&1 &
+          printf '$ python3 manage.py runserver 127.0.0.1:8000\n' > /tmp/django_server.log
+          nohup python3 -u manage.py runserver 127.0.0.1:8000 --noreload >> /tmp/django_server.log 2>&1 &
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:8000/ > /dev/null; then
-              echo "Django server is running on http://127.0.0.1:8000"
               sleep 1
               cat /tmp/django_server.log
               exit 0
