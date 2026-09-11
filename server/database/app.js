@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const fs = require('fs');
+const path = require('path');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 
@@ -12,8 +13,18 @@ const useMemoryDb = process.env.USE_MEMORY_DB === 'true';
 app.use(cors());
 app.use(bodyParser.urlencoded({ extended: false }));
 
-const reviewsData = JSON.parse(fs.readFileSync('reviews.json', 'utf8')).reviews;
-const dealershipsData = JSON.parse(fs.readFileSync('dealerships.json', 'utf8')).dealerships;
+const dataFile = (name) => {
+  const candidates = [
+    path.join(__dirname, 'data', name),
+    path.join(__dirname, name),
+  ];
+  const found = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!found) throw new Error(`Unable to find bundled data file: ${name}`);
+  return found;
+};
+
+const reviewsData = JSON.parse(fs.readFileSync(dataFile('reviews.json'), 'utf8')).reviews;
+const dealershipsData = JSON.parse(fs.readFileSync(dataFile('dealerships.json'), 'utf8')).dealerships;
 let memoryReviews = reviewsData.map((item) => ({ ...item }));
 let memoryDealers = dealershipsData.map((item) => ({ ...item }));
 
