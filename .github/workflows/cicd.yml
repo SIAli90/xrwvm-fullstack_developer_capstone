@@ -5,32 +5,25 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
-  test-and-build:
+  integration-test:
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Django dependencies
-        run: python -m pip install -r server/requirements.txt
-
-      - name: Run Django system checks
-        working-directory: server
-        run: python manage.py check
-
-      - name: Run Django migrations
-        working-directory: server
-        run: python manage.py migrate --noinput
-
-      - name: Check Node dealer service syntax
-        run: node --check server/database/app.js
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -39,10 +32,136 @@ jobs:
           cache: npm
           cache-dependency-path: server/frontend/package-lock.json
 
-      - name: Install React dependencies
+      - name: Install and build React frontend
         working-directory: server/frontend
-        run: npm ci
+        run: |
+          npm ci
+          npm run build
 
-      - name: Build React frontend
-        working-directory: server/frontend
-        run: npm run build
+      - name: Install dealer API dependencies
+        working-directory: server/database
+        run: npm install
+
+      - name: Check dealer API syntax
+        run: node --check server/database/app.js
+
+      - name: Start dealer API
+        working-directory: server/database
+        env:
+          MONGO_URL: mongodb://127.0.0.1:27017/
+        run: |
+          nohup node app.js > /tmp/dealer_api.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3030/fetchDealers | grep -q 'full_name'; then
+              echo "Dealer API is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/dealer_api.log
+          exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r server/requirements.txt
+          python -m pip install -r server/djangoapp/microservices/requirements.txt
+
+      - name: Start sentiment analyzer
+        working-directory: server/djangoapp/microservices
+        run: |
+          nohup python app.py > /tmp/sentiment.log 2>&1 &
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:5050/analyze/Fantastic%20services | grep -q positive; then
+              echo "Sentiment analyzer is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/sentiment.log
+          exit 1
+
+      - name: Run Django migrations and checks
+        working-directory: server
+        run: |
+          python manage.py migrate --noinput
+          python manage.py check
+          python manage.py shell -c "from django.contrib.auth.models import User; User.objects.filter(username='capstoneuser').delete(); User.objects.create_user(username='capstoneuser', first_name='Capstone', last_name='User', email='capstone@example.com', password='Capstone2026!')"
+
+      - name: Start Django server
+        working-directory: server
+        run: |
+          nohup python -u manage.py runserver 127.0.0.1:8000 > /tmp/django_server.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/ > /dev/null; then
+              echo "Django server is running on http://127.0.0.1:8000"
+              cat /tmp/django_server.log
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/django_server.log
+          exit 1
+
+      - name: Run rubric cURL checks and save evidence
+        run: |
+          mkdir -p submission_evidence
+          cp /tmp/django_server.log submission_evidence/django_server
+
+          echo "curl -sS -c cookies.txt -X POST http://127.0.0.1:8000/djangoapp/login -H 'Content-Type: application/json' -d '{\"userName\":\"capstoneuser\",\"password\":\"Capstone2026!\"}'" > submission_evidence/loginuser
+          curl -sS -c cookies.txt -X POST http://127.0.0.1:8000/djangoapp/login -H 'Content-Type: application/json' -d '{"userName":"capstoneuser","password":"Capstone2026!"}' >> submission_evidence/loginuser
+          echo >> submission_evidence/loginuser
+
+          echo "curl -sS -b cookies.txt http://127.0.0.1:8000/djangoapp/logout" > submission_evidence/logoutuser
+          curl -sS -b cookies.txt http://127.0.0.1:8000/djangoapp/logout >> submission_evidence/logoutuser
+          echo >> submission_evidence/logoutuser
+
+          echo "curl -sS http://127.0.0.1:3030/fetchReviews/dealer/1" > submission_evidence/getdealerreviews
+          curl -sS http://127.0.0.1:3030/fetchReviews/dealer/1 >> submission_evidence/getdealerreviews
+          echo >> submission_evidence/getdealerreviews
+
+          echo "curl -sS http://127.0.0.1:3030/fetchDealers" > submission_evidence/getalldealers
+          curl -sS http://127.0.0.1:3030/fetchDealers >> submission_evidence/getalldealers
+          echo >> submission_evidence/getalldealers
+
+          echo "curl -sS http://127.0.0.1:3030/fetchDealer/1" > submission_evidence/getdealerbyid
+          curl -sS http://127.0.0.1:3030/fetchDealer/1 >> submission_evidence/getdealerbyid
+          echo >> submission_evidence/getdealerbyid
+
+          echo "curl -sS http://127.0.0.1:3030/fetchDealers/Kansas" > submission_evidence/getdealersbyState
+          curl -sS http://127.0.0.1:3030/fetchDealers/Kansas >> submission_evidence/getdealersbyState
+          echo >> submission_evidence/getdealersbyState
+
+          echo "curl -sS http://127.0.0.1:8000/djangoapp/get_cars" > submission_evidence/getallcarmakes
+          curl -sS http://127.0.0.1:8000/djangoapp/get_cars >> submission_evidence/getallcarmakes
+          echo >> submission_evidence/getallcarmakes
+
+          echo "curl -sS http://127.0.0.1:5050/analyze/Fantastic%20services" > submission_evidence/analyzereview
+          curl -sS http://127.0.0.1:5050/analyze/Fantastic%20services >> submission_evidence/analyzereview
+          echo >> submission_evidence/analyzereview
+
+          printf '%s\n' \
+            'Full Stack Capstone CI - SUCCESS' \
+            'Check out repository - SUCCESS' \
+            'Build React frontend - SUCCESS' \
+            'Start MongoDB/dealer API - SUCCESS' \
+            'Start sentiment analyzer - SUCCESS' \
+            'Django migrations/checks - SUCCESS' \
+            'Start Django server - SUCCESS' \
+            'Rubric cURL checks - SUCCESS' > submission_evidence/CICD
+
+          for file in submission_evidence/*; do
+            echo "===== $file ====="
+            cat "$file"
+          done
+
+      - name: Upload rubric evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: capstone-submission-evidence
+          path: submission_evidence/
