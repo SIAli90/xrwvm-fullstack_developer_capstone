@@ -3,7 +3,6 @@ import logging
 
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
@@ -32,10 +31,7 @@ def login_user(request):
     user = authenticate(username=username, password=password)
 
     if user is None:
-        return JsonResponse(
-            {'userName': username, 'status': 'Failed'},
-            status=401,
-        )
+        return JsonResponse({'userName': username, 'status': 'Failed'}, status=401)
 
     login(request, user)
     return JsonResponse({
@@ -83,10 +79,7 @@ def registration(request):
         password=password,
     )
     login(request, user)
-    return JsonResponse(
-        {'userName': username, 'status': 'Authenticated'},
-        status=201,
-    )
+    return JsonResponse({'userName': username, 'status': 'Authenticated'}, status=201)
 
 
 def get_dealerships(request, state='All'):
@@ -150,18 +143,19 @@ def add_review(request):
     try:
         saved_review = post_review(data)
         return JsonResponse({'status': 200, 'review': saved_review})
-    except (ValidationError, Exception) as exc:
+    except Exception as exc:
         logger.exception('Unable to post review: %s', exc)
-        return JsonResponse(
-            {'status': 503, 'message': 'Unable to post review'},
-            status=503,
-        )
+        return JsonResponse({'status': 503, 'message': 'Unable to post review'}, status=503)
 
 
 def get_cars(request):
     if CarMake.objects.count() == 0:
         initiate()
 
+    car_makes = [
+        {'name': make.name, 'description': make.description}
+        for make in CarMake.objects.order_by('name')
+    ]
     car_models = CarModel.objects.select_related('car_make').all()
     cars = [
         {
@@ -172,7 +166,11 @@ def get_cars(request):
         }
         for car_model in car_models
     ]
-    return JsonResponse({'status': 200, 'CarModels': cars})
+    return JsonResponse({
+        'status': 200,
+        'CarMakes': car_makes,
+        'CarModels': cars,
+    })
 
 
 def analyze_review(request, text):
@@ -181,7 +179,4 @@ def analyze_review(request, text):
         return JsonResponse({'text': text, **result})
     except Exception as exc:
         logger.exception('Unable to analyze review: %s', exc)
-        return JsonResponse(
-            {'text': text, 'sentiment': 'unavailable'},
-            status=503,
-        )
+        return JsonResponse({'text': text, 'sentiment': 'unavailable'}, status=503)
