@@ -7,31 +7,73 @@ const bodyParser = require('body-parser');
 const app = express();
 const port = process.env.PORT || 3030;
 const mongoUrl = process.env.MONGO_URL || 'mongodb://mongo_db:27017/';
+const useMemoryDb = process.env.USE_MEMORY_DB === 'true';
 
 app.use(cors());
 app.use(bodyParser.urlencoded({ extended: false }));
 
-const reviews_data = JSON.parse(fs.readFileSync('reviews.json', 'utf8'));
-const dealerships_data = JSON.parse(fs.readFileSync('dealerships.json', 'utf8'));
-
-mongoose.connect(mongoUrl, { dbName: 'dealershipsDB' });
+const reviewsData = JSON.parse(fs.readFileSync('reviews.json', 'utf8')).reviews;
+const dealershipsData = JSON.parse(fs.readFileSync('dealerships.json', 'utf8')).dealerships;
+let memoryReviews = reviewsData.map((item) => ({ ...item }));
+let memoryDealers = dealershipsData.map((item) => ({ ...item }));
 
 const Reviews = require('./review');
 const Dealerships = require('./dealership');
 
-async function seedData() {
+async function seedMongo() {
   try {
+    await mongoose.connect(mongoUrl, { dbName: 'dealershipsDB' });
     await Reviews.deleteMany({});
-    await Reviews.insertMany(reviews_data.reviews);
+    await Reviews.insertMany(reviewsData);
     await Dealerships.deleteMany({});
-    await Dealerships.insertMany(dealerships_data.dealerships);
-    console.log('Dealership and review data loaded.');
+    await Dealerships.insertMany(dealershipsData);
+    console.log('MongoDB dealership and review data loaded.');
   } catch (error) {
-    console.error('Error loading seed documents:', error);
+    console.error('MongoDB initialization failed:', error.message);
   }
 }
 
-seedData();
+if (useMemoryDb) {
+  console.log('Dealer API is using in-memory JSON data.');
+} else {
+  seedMongo();
+}
+
+const allReviews = async () => {
+  if (useMemoryDb) return memoryReviews;
+  return Reviews.find().sort({ id: 1 }).lean();
+};
+
+const reviewsByDealer = async (dealerId) => {
+  if (useMemoryDb) {
+    return memoryReviews.filter((review) => Number(review.dealership) === dealerId);
+  }
+  return Reviews.find({ dealership: dealerId }).sort({ id: 1 }).lean();
+};
+
+const allDealers = async () => {
+  if (useMemoryDb) return memoryDealers;
+  return Dealerships.find().sort({ id: 1 }).lean();
+};
+
+const dealersByState = async (state) => {
+  if (state.toLowerCase() === 'all') return allDealers();
+  if (useMemoryDb) {
+    return memoryDealers.filter(
+      (dealer) => String(dealer.state || '').toLowerCase() === state.toLowerCase()
+    );
+  }
+  return Dealerships.find({ state: { $regex: `^${state}$`, $options: 'i' } })
+    .sort({ id: 1 })
+    .lean();
+};
+
+const dealerById = async (dealerId) => {
+  if (useMemoryDb) {
+    return memoryDealers.filter((dealer) => Number(dealer.id) === dealerId);
+  }
+  return Dealerships.find({ id: dealerId }).lean();
+};
 
 app.get('/', (req, res) => {
   res.send('Welcome to the Mongoose API');
@@ -39,8 +81,7 @@ app.get('/', (req, res) => {
 
 app.get('/fetchReviews', async (req, res) => {
   try {
-    const documents = await Reviews.find().sort({ id: 1 });
-    res.json(documents);
+    res.json(await allReviews());
   } catch (error) {
     res.status(500).json({ error: 'Error fetching documents' });
   }
@@ -48,9 +89,7 @@ app.get('/fetchReviews', async (req, res) => {
 
 app.get('/fetchReviews/dealer/:id', async (req, res) => {
   try {
-    const dealerId = Number(req.params.id);
-    const documents = await Reviews.find({ dealership: dealerId }).sort({ id: 1 });
-    res.json(documents);
+    res.json(await reviewsByDealer(Number(req.params.id)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching documents' });
   }
@@ -58,8 +97,7 @@ app.get('/fetchReviews/dealer/:id', async (req, res) => {
 
 app.get('/fetchDealers', async (req, res) => {
   try {
-    const documents = await Dealerships.find().sort({ id: 1 });
-    res.json(documents);
+    res.json(await allDealers());
   } catch (error) {
     res.status(500).json({ error: 'Error fetching dealerships' });
   }
@@ -67,12 +105,7 @@ app.get('/fetchDealers', async (req, res) => {
 
 app.get('/fetchDealers/:state', async (req, res) => {
   try {
-    const state = req.params.state;
-    const query = state.toLowerCase() === 'all'
-      ? {}
-      : { state: { $regex: `^${state}$`, $options: 'i' } };
-    const documents = await Dealerships.find(query).sort({ id: 1 });
-    res.json(documents);
+    res.json(await dealersByState(req.params.state));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching dealerships by state' });
   }
@@ -80,9 +113,7 @@ app.get('/fetchDealers/:state', async (req, res) => {
 
 app.get('/fetchDealer/:id', async (req, res) => {
   try {
-    const dealerId = Number(req.params.id);
-    const documents = await Dealerships.find({ id: dealerId });
-    res.json(documents);
+    res.json(await dealerById(Number(req.params.id)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching dealership' });
   }
@@ -91,26 +122,30 @@ app.get('/fetchDealer/:id', async (req, res) => {
 app.post('/insert_review', express.raw({ type: '*/*' }), async (req, res) => {
   try {
     const data = JSON.parse(req.body.toString());
-    const documents = await Reviews.find().sort({ id: -1 }).limit(1);
-    const newId = documents.length > 0 ? documents[0].id + 1 : 1;
-
-    const review = new Reviews({
+    const existing = await allReviews();
+    const newId = Math.max(0, ...existing.map((review) => Number(review.id) || 0)) + 1;
+    const newReview = {
       id: newId,
       name: data.name,
       dealership: Number(data.dealership),
       review: data.review,
-      purchase: data.purchase,
+      purchase: Boolean(data.purchase),
       purchase_date: data.purchase_date,
       car_make: data.car_make,
       car_model: data.car_model,
       car_year: Number(data.car_year),
-    });
+    };
 
-    const savedReview = await review.save();
-    res.json(savedReview);
+    if (useMemoryDb) {
+      memoryReviews.push(newReview);
+      return res.json(newReview);
+    }
+
+    const savedReview = await new Reviews(newReview).save();
+    return res.json(savedReview);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Error inserting review' });
+    return res.status(500).json({ error: 'Error inserting review' });
   }
 });
 
