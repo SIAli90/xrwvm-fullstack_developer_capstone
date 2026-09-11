@@ -36,7 +36,7 @@ jobs:
       - name: Install and build React frontend
         working-directory: server/frontend
         run: |
-          npm ci
+          npm install
           npm run build
 
       - name: Install dealer API dependencies
